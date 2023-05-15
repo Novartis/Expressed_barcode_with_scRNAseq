@@ -1,0 +1,297 @@
+__author__ = 'krishvi7'
+import os
+import sys
+import os.path
+import re
+import barcode_count
+import simplify
+import matricize
+import tall_skinny
+import cw_qualitysummary
+from argparse import ArgumentParser
+from datetime import datetime
+
+# Contains functions used across the package
+class Common():
+
+    # Default values for parameters
+    output_prefix = "output"
+    barcode_index = "AGCAGAG"
+    phred_format = 33
+    barcode_length = 30
+    pickle_file = "barcode_counter.p"
+    base_cutoff = 10
+    average_cutoff = 30
+
+    def __init__(self):
+        self.args_with_params = {'q': {'verbose': 'phred_format', 'desc': "phred quality format. must be 33 or 64", 'default': 33, 'type': int},
+                            'b': {'verbose': 'barcode_index', 'desc': 'primer index following WS barcode', 'default': self.barcode_index, 'type': str},
+                            'k': {'verbose': 'known_contaminant', 'desc': 'Text file containing known contaminant barcodes', 'type': str},
+                            'e': {'verbose': 'barcode_length', 'desc': "barcode sequence length (default = " + str(self.barcode_length) + ")", 'default': self.barcode_length, 'type': int},
+                            'f': {'verbose': 'seq_pickle_file', 'desc': "Path of pickle file to load for pre-loaded sequences instead of using fastq files (with -p option) or to save to", 'default': self.pickle_file, 'type': str},
+                            'x': {'verbose': 'exclude_sequences_file', 'desc': "File containing sequences to exclude", 'type': str},
+                            'z': {'verbose': 'include_sequences_file', 'desc': "File containing the only sequences to include", 'type': str},
+                            'a': {'verbose': 'sequence_primer', 'desc': "File containing a primer of sequences which should form the main barcode sequences exclusively", 'type': str},
+                            'g': {'verbose': 'barcode_pickle_file', 'desc': "Path of pickle file to load for fully generated stats instead of using fastq files (with -p/-t options) or to save to", 'default': self.pickle_file, 'type': str},
+                            'y': {'verbose': 'base_cutoff', 'desc': 'Min base quality cutoff for read filtering (reads with any base below this quality will be discarded; default = ' + str(self.base_cutoff) + ')', 'default': self.base_cutoff, 'type': int},
+                            'ac': {'verbose': 'average_cutoff', 'desc': 'Average read quality cutoff for read filtering (reads with average quality below this will be discarded; default = ' + str(self.average_cutoff) + ')', 'default': self.average_cutoff, 'type': int},
+                            'lf': {'verbose': 'library_files', 'desc': 'Library files to use for seed matching', 'type': str},
+                            'spf': {'verbose': 'seed_pickle_file', 'desc': 'Pickle file to save/load snapshot of seeded-only barcodes', 'type': str}
+                                }
+        self.args_paramless = {'l': {'verbose': 'library_mode', 'desc': "Library mode excludes barcode merging step", 'default': False},
+                                'n': {'verbose': 'no_index', 'desc': "Exclude primer index sequence from analysis (overrides -b)", 'default': False},
+                                'd': {'verbose': 'allow_indels', 'desc': "Allow indels", 'default': False},
+                                'w': {'verbose': 'no_ws_req', 'desc': 'No WS requirement', 'default': False},
+                                'u': {'verbose': 'unknown_bases', 'desc': "Sequences can include unknown bases (N) (only used with -w)", 'default': False},
+                                'p': {'verbose': 'load_seqs_from_pickle', 'desc': "Load sequences from pickle file instead of using fastq files", 'default': False},
+                                't': {'verbose': 'load_barcodes_from_pickle', 'desc': "Load barcodes from pickle file (overrides -p and -lsfp options)", 'default': False},
+                                'lsfp': {'verbose': 'load_seeds_from_pickle', 'desc': "Load seeds from pickle (overrides -p option)", 'default': False},
+                                'v': {'verbose': 'no_pickle_save', 'desc': "Don't save to pickle files", 'default': False}
+                              }
+        self.range_dict = {"phred_format": [33, 64]}
+        return
+
+    @staticmethod
+    def createArgumentParser(obj, parser = None):
+        if parser is None:
+            parser = ArgumentParser()
+        for arg in obj.args_with_params:
+            info = obj.args_with_params[arg]
+            flag = info['verbose']
+            parser.add_argument('-'+arg, '--'+flag, dest=flag, type = info['type'],
+                                help = info['desc'],
+                                default = info['default'] if 'default' in info else None,
+                                required = 'required' in info and info['required'])
+        for arg in obj.args_paramless:
+            info = obj.args_paramless[arg]
+            flag = info['verbose']
+            defaultState = info['default']
+            flagAction = 'store_' + str(not defaultState).lower()
+            parser.add_argument('-'+arg, '--'+flag, help = info['desc'], dest=flag, action=flagAction)
+        return parser
+
+    @staticmethod
+    def setAttributesFromArgs(obj, argsDict):
+        common = Common()
+        for arg in argsDict:
+            val = argsDict[arg]
+            if arg in common.range_dict:
+                allowedValues = common.range_dict[arg]
+                if val not in allowedValues:
+                    raise ValueError("Argument for " + arg + " must be one of: " + ",".join(map(str, allowedValues)))
+            setattr(obj, arg, val)
+
+    @staticmethod
+    def print_error(message):
+        print >> sys.stderr, "ERROR: "+message
+        sys.exit(1)
+
+    @staticmethod
+    def get_timestamp():
+        return datetime.utcnow().strftime('%Y%m%d%H%M%S')
+
+    @staticmethod
+    def super_usage():
+        print("\nClonTracer package V1.0- ClonTracer package is used to analyze barcode data obtained from ClonTracer"
+              " library")
+
+class ClonTracerCountBarcodes_parent():
+    def __init__(self, module, barcode_index, known_contaminant, phred_format, library_mode, barcode_length,
+                 allow_indels, no_ws_req, unknown_bases, load_seqs_from_pickle, load_barcodes_from_pickle,
+                 seq_pickle_file, barcodes_pickle_file, include_sequences_file, exclude_sequences_file,
+                 sequence_primer, no_pickle_save, base_cutoff, average_cutoff, no_index, library_files,
+                 seed_pickle_file, load_seeds_from_pickle):
+        self.module = module
+        self.barcode_index = barcode_index
+        self.barcode_length = barcode_length
+        self.phred_format = phred_format
+        self.library_mode = library_mode
+        self.allow_indels = allow_indels
+        self.no_index = no_index
+        self.no_ws_req = no_ws_req
+        self.unknown_bases = unknown_bases
+        self.known_contaminant = known_contaminant
+        self.load_seqs_from_pickle = load_seqs_from_pickle
+        self.load_barcodes_from_pickle = load_barcodes_from_pickle
+        self.seq_pickle_file = seq_pickle_file
+        self.barcodes_pickle_file = barcodes_pickle_file
+        self.include_sequences_file = include_sequences_file
+        self.exclude_sequences_file = exclude_sequences_file
+        self.sequence_primer = sequence_primer
+        self.no_pickle_save = no_pickle_save
+        self.base_cutoff = base_cutoff
+        self.average_cutoff = average_cutoff
+        self.library_files = library_files
+        self.seed_pickle_file = seed_pickle_file
+        self.load_seeds_from_pickle = load_seeds_from_pickle
+
+# Contains code to validate a list of input files
+class ClonTracerCountBarcodes(ClonTracerCountBarcodes_parent):
+
+    def __init__(self, input_files="", input_file_list=list(), output_prefix=Common.output_prefix,
+                 barcode_index=Common.barcode_index, known_contaminant="", phred_format=Common.phred_format, barcode_file = "",
+                 library_mode=False, barcode_length=Common.barcode_length, allow_indels=False, no_index=False, no_ws_req = False, unknown_bases=False,
+                 load_seqs_from_pickle=False, load_barcodes_from_pickle=False, seq_pickle_file=Common.pickle_file, barcodes_pickle_file=Common.pickle_file,
+                 include_sequences_file=None, exclude_sequences_file=None, sequence_primer = None, no_pickle_save = False,
+                 base_cutoff = Common.base_cutoff, average_cutoff = Common.average_cutoff, library_files = None,
+                 seed_pickle_file = None, load_seeds_from_pickle = False):
+        ClonTracerCountBarcodes_parent.__init__(self, module = "clonTracer_countBarcodes", barcode_index=barcode_index, known_contaminant=known_contaminant, phred_format=phred_format,
+                                                     library_mode=library_mode, barcode_length=barcode_length, allow_indels=allow_indels, no_index=no_index, no_ws_req=no_ws_req,
+                                                      unknown_bases=unknown_bases, load_seqs_from_pickle=load_seqs_from_pickle, load_barcodes_from_pickle=load_barcodes_from_pickle,
+                                                      seq_pickle_file=seq_pickle_file, barcodes_pickle_file=barcodes_pickle_file, include_sequences_file=include_sequences_file,
+                                                      exclude_sequences_file=exclude_sequences_file, sequence_primer=sequence_primer, no_pickle_save=no_pickle_save,
+                                                      base_cutoff=base_cutoff, average_cutoff=average_cutoff, library_files=library_files,
+                                                      seed_pickle_file=seed_pickle_file, load_seeds_from_pickle=load_seeds_from_pickle)
+        self.input_file_list = input_file_list
+        self.input_files = input_files
+        self.output_prefix = output_prefix
+        self.barcode_file = barcode_file
+        self.file_extension_list = [".fastq", ".fq", ".fastq.gz", ".fastq.bz2"]
+
+        self.args_with_params = {'i': {'verbose': 'input_files', 'desc': "Comma separated list of fastq files. Supports "+",".join(self.file_extension_list), 'required': False, 'type': str},
+                                 'o': {'verbose': 'output_prefix', 'desc': "Output prefix", 'required': False, 'default': Common.output_prefix, 'type': str}}
+        self.args_paramless = {}
+
+    def check_input_files(self):
+        if self.load_barcodes_from_pickle or self.load_seeds_from_pickle or self.load_seqs_from_pickle:
+            return
+
+        if self.input_files == "":
+            Common.print_error("Input file(s) for barcode counting not supplied")
+
+        for input_file in self.input_files.split(","):
+            if not os.path.isfile(input_file):
+                Common.print_error("Input file "+input_file+" does not exist")
+
+            if not any(input_file.endswith(x) for x in self.file_extension_list):
+                Common.print_error("Invalid input "+input_file+", Must be a *"+' ,*'.join(self.file_extension_list))
+
+    def count_barcodes(self):
+        self.barcode_file = self.output_prefix+".barcode_verbose.txt"
+        print("\nCounting barcodes: " + datetime.strftime(datetime.now(), '%Y-%m-%d %H:%M:%S'))
+        barcode_count.barcode_count(input_file_list=self.input_files, output_file=self.barcode_file, barcode_index=self.barcode_index,
+                                    barcode_length=self.barcode_length, known_contaminant=self.known_contaminant,
+                                    phred_format=self.phred_format, library_mode=self.library_mode, allow_indels=self.allow_indels,
+                                    no_ws_req=self.no_ws_req, unknown_bases=self.unknown_bases, load_seqs_from_pickle=self.load_seqs_from_pickle,
+                                    load_barcodes_from_pickle=self.load_barcodes_from_pickle, seq_pickle_file=self.seq_pickle_file,
+                                    barcodes_pickle_file=self.barcodes_pickle_file, include_sequences_file=self.include_sequences_file,
+                                    exclude_sequences_file=self.exclude_sequences_file, sequence_primer=self.sequence_primer,
+                                    no_pickle_save=self.no_pickle_save, base_cutoff=self.base_cutoff, average_cutoff=self.average_cutoff,
+                                    library_files=self.library_files, seed_pickle_file=self.seed_pickle_file, load_seeds_from_pickle=self.load_seeds_from_pickle)
+
+    def simplify_barcodes(self):
+        print("Simplifying barcode from sample "+self.output_prefix + ": " + datetime.strftime(datetime.now(), '%Y-%m-%d %H:%M:%S'))
+        simplify.simplify_barcodes(self.barcode_file, self.output_prefix+".barcode.txt", self.output_prefix +
+                                   ".cumulative_wealth.txt")
+
+
+# Contains code to validate an input directory and submits individual samples
+class ClonTracerCountBarcodesExperiment(ClonTracerCountBarcodes_parent):
+
+    def __init__(self, input_directory="", output_directory=Common.output_prefix+"_"+Common.get_timestamp(), suppress_quality_cw_summary=False,
+                 library_mode=False, suppress_matrix=False, suppress_tall_skinny=False, no_index=False, barcode_index=Common.barcode_index,
+                 known_contaminant="", phred_format=Common.phred_format, sample_pattern_regex="", test_mode=False, barcode_length=Common.barcode_length,
+                 allow_indels=False, no_ws_req=False, unknown_bases=False, load_seqs_from_pickle=False, load_barcodes_from_pickle=False, include_sequences_file=None,
+                 exclude_sequences_file=None, sequence_primer=None, no_pickle_save=False, seq_pickle_file = Common.pickle_file,
+                 barcodes_pickle_file = Common.pickle_file, base_cutoff = Common.base_cutoff, average_cutoff = Common.average_cutoff,
+                 library_files = None, seed_pickle_file = None, load_seeds_from_pickle = False):
+        ClonTracerCountBarcodes_parent.__init__(self, module = "clonTracer_countBarcodes_experiment", barcode_index=barcode_index, known_contaminant=known_contaminant, phred_format=phred_format,
+                                                     library_mode=library_mode, barcode_length=barcode_length, allow_indels=allow_indels, no_index=no_index, no_ws_req=no_ws_req,
+                                                      unknown_bases=unknown_bases, load_seqs_from_pickle=load_seqs_from_pickle, load_barcodes_from_pickle=load_barcodes_from_pickle,
+                                                      seq_pickle_file=seq_pickle_file, barcodes_pickle_file=barcodes_pickle_file, include_sequences_file=include_sequences_file,
+                                                      exclude_sequences_file=exclude_sequences_file, sequence_primer=sequence_primer, no_pickle_save=no_pickle_save,
+                                                      base_cutoff=base_cutoff, average_cutoff=average_cutoff, library_files=library_files,
+                                                      seed_pickle_file=seed_pickle_file, load_seeds_from_pickle=load_seeds_from_pickle)
+        self.input_directory = input_directory
+        self.output_directory = output_directory
+        self.suppress_quality_cw_summary = suppress_quality_cw_summary
+        self.suppress_matrix = suppress_matrix
+        self.suppress_tall_skinny = suppress_tall_skinny
+        self.sample_pattern_regex = sample_pattern_regex
+        self.test_mode = test_mode
+
+        self.args_with_params = {'i': {'verbose': 'input_directory', 'desc': "Input directory containing the folder structure as described in the documentation", 'required': True, 'type': str},
+                                 'o': {'verbose': 'output_directory', 'desc': "Output directory", 'required': False, 'type': str, 'default': Common.output_prefix + "_<datetimevalue>"},
+                                 'r': {'verbose': 'sample_pattern_regex', 'desc': "Sample pattern regex", 'required': False, 'type': str}}
+        self.args_paramless = {'c': {'verbose': 'suppress_quality_cw_summary', 'desc': "Do not produce the quality and cumulative summary file", 'default': False},
+                               'm': {'verbose': 'suppress_matrix', 'desc': "Do not produce barcodes x samples matrix of barcode fraction", 'default': False},
+                               's': {'verbose': 'suppress_tall_skinny', 'desc': "Do not produce tall-skinny version of barcode-sample matrix", 'default': False}}
+
+    # Checks the existence of input directory and prints appropriate messages
+    def check_input_directory(self):
+
+        print("Checking input directory")
+        if self.input_directory == "":
+            Common.print_error("Input directory for barcode counting not supplied")
+
+        if not os.path.isdir(self.input_directory):
+            Common.print_error("Input directory "+self.input_directory + " does not exist")
+
+        print("Input directory "+self.input_directory+" found")
+
+    # Checks the existence of the output directory
+    def check_output_directory(self):
+        if not os.path.exists(self.output_directory):
+            if not self.test_mode:
+                os.makedirs(self.output_directory)
+        print("Output would be stored in "+self.output_directory)
+
+    # Checks the existence of the output directory
+    def check_known_contaminant_file(self):
+        if self.known_contaminant != "":
+            if not os.path.exists(self.known_contaminant):
+                Common.print_error("Contaminant file " + self.known_contaminant+" does not exist")
+
+    # Calls method to generate cw and quality summary
+    def cw_quality_summary(self):
+        print("Collating quality and cumulative summary for the experiment....")
+        cw_qualitysummary.cw_qualitysummary(self.output_directory, "cw_summary.txt", "quality_summary.txt")
+
+    # Calls method to generate tall skinny file
+    def tall_skinny(self):
+
+        if not self.test_mode:
+            print("Generating tall-skinny barcode fractions....")
+            tall_skinny.tall_skinny(self.output_directory, "tall_skinny.txt")
+        else:
+            print("Count and Fraction matrix would be generated")
+
+    # Call method to create barcode matrix
+    def matricize(self):
+
+        if not self.test_mode:
+            print("Generating count and fraction matrix....")
+            matricize.matricize(self.output_directory, "matrix_count.txt", "matrix_fraction.txt")
+        else:
+            print("Count and Fraction matrix would be generated")
+
+    # Go over all the fastq files in the directory and count the barcodes
+    def count_barcodes_on_samples(self):
+
+        # Iterate over all the samples in the input directory
+        for sample in os.listdir(self.input_directory):
+            if sample.startswith('.'):
+                continue
+            # Check for regex if any
+            if self.sample_pattern_regex != "":
+                if not re.match(self.sample_pattern_regex, sample):
+                    continue
+
+            sample_path = self.input_directory+"/"+sample
+
+            clt_object = ClonTracerCountBarcodes(input_file_list=list(),
+                                                 output_prefix=self.output_directory+"/"+sample,
+                                                 barcode_index=self.barcode_index,
+                                                 phred_format=self.phred_format,
+                                                 known_contaminant=self.known_contaminant,
+                                                 library_mode=self.library_mode)
+            for files in os.listdir(sample_path):
+                if "fastq" in files or "fq" in files:
+                    clt_object.input_file_list.append(sample_path+"/"+files)
+
+            clt_object.input_files = ','.join(clt_object.input_file_list)
+
+            clt_object.count_barcodes()
+            clt_object.simplify_barcodes()
+
+

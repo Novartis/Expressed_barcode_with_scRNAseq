@@ -1,0 +1,34 @@
+__author__ = 'KRISHVI7'
+import glob
+import os.path
+
+
+def cw_qualitysummary(output_directory, cw_summary, quality_summary):
+
+    try:
+
+        with open(output_directory+"/"+quality_summary, 'w') as f:
+            f.write("Sample\tCategory\tRead_Count")
+            f.write("\n")
+            for filename in glob.glob(output_directory+"/*barcode_verbose.txt"):
+                samp = os.path.basename(filename).split(".barcode_verbose.txt")[0]
+                fh = open(filename)
+                for line in fh:
+                    if "#" not in line:
+                        break
+                    line_split = line.strip().split(":")
+                    f.write(samp+"\t"+line_split[0][1:]+"\t"+line_split[1].strip())
+                    f.write("\n")
+
+        with open(output_directory+"/"+cw_summary, 'w') as f:
+            f.write("Sample\tCumulativeWealth\tUniqueBarcodeCount")
+            f.write("\n")
+            for filename in glob.glob(output_directory+"/*cumulative_wealth.txt"):
+                samp = os.path.basename(filename).split(".cumulative_wealth.txt")[0]
+                fh = open(filename)
+                fh.readline()
+                for line in fh:
+                    f.write(samp+"\t"+line.strip())
+                    f.write("\n")
+    except:
+        raise

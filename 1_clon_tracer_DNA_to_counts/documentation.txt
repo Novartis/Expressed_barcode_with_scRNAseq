@@ -1,0 +1,31 @@
+clonTracer_v1.0
+
+clonTracer_analyze is a bioinformatics package written in python and is used to analyze files generated from the clonTracer experiment. clonTracer_analyze estimates the count and fraction of barcodes seen in the fastq file. It generates also generate experiment level summaries.
+
+clonTracer_analyze can be called for individual samples or for the experiment on a whole. Experiment level analysis is accompanied by quality summary, cumulative wealth summary, matrix of barcode vs sample, tall skinny barcode-sample.
+
+Only barcodes passing all the quality filters (see quality summary glossary) and seen at least twice are considered for the analysis. Furthermost, barcodes that are 1 hamming distance away and is seen at less 1/8th time the parent barcodes is considered to be a base call error and merged with the parent barcodes. Similar strategy is applied for barcodes seen at 2 hamming distance away and is seen at less than 1/40th the parent.
+
+It is a good practice to look at the quality summary and cumulative summary files before the analysis. Quality summary gives a good estimate of coverage and total good reads (should ideally be about 70-80% of the total reads)
+
+matrix file can be used to generated a heatmap to visualize enriched barcodes and to investigate barcode sharing between replicates/ groups.
+
+
+
+Glossary:
+
+cumulative wealth (c.w.): Total percent contributed by 'X' unique barcodes. 'X' is a measure of barcode complexity in a given sample. A sample where 50,00 unique barcodes are required to form the top 80% of of the barcode population (80% c.w.) is more complex than a sample with 50 unique barcodes are seen in the same 80% c.w. 
+
+barcode: 30mer (15 x WS repeats) sequence used to tag cell lines. 
+
+hamming distance: number of bases by which the 2 barcodes differ.
+
+quality summary: Categorized based on the fate of fastq sequence during barcode counting.
+		 Total sequences: Total number of sequences seen in the fastq(or list of fastq) file(s)
+		 Total barcodes added: Total number of 'good' barcodes that are would be used in the analysis
+		 Total bad end reads: Total number of reads that fail to follow the 7bp index (can be user defined)
+		 Total bad seq reads: Total number of barcodes that fail to follow 15 x WS pattern due to base calling error or indels
+		 Total bad base qual: Total number of reads that have at least one base less than phred score of 10 (can be user defined)
+		 Total bad avg qual: Total number of reads that have an average phred score of less than 30 (can be user defined)
+		 Total less than two: Total number of barcodes that are seen just once. They are insignificant from an analysis perspective and can be safely excluded
+		 Total known contaminants: Total number of barcodes that match the known contaminant list if specified by the user

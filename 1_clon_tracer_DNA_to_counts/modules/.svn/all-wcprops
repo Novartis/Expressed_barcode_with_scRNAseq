@@ -1,0 +1,47 @@
+K 25
+svn:wc:ra_dav:version-url
+V 67
+/svn/NITAS_ONC_USCA/!svn/ver/12541/clonTracer_analyze/trunk/modules
+END
+classes.py
+K 25
+svn:wc:ra_dav:version-url
+V 78
+/svn/NITAS_ONC_USCA/!svn/ver/13715/clonTracer_analyze/trunk/modules/classes.py
+END
+cw_qualitysummary.py
+K 25
+svn:wc:ra_dav:version-url
+V 88
+/svn/NITAS_ONC_USCA/!svn/ver/13501/clonTracer_analyze/trunk/modules/cw_qualitysummary.py
+END
+__init__.py
+K 25
+svn:wc:ra_dav:version-url
+V 79
+/svn/NITAS_ONC_USCA/!svn/ver/12538/clonTracer_analyze/trunk/modules/__init__.py
+END
+barcode_count.py
+K 25
+svn:wc:ra_dav:version-url
+V 84
+/svn/NITAS_ONC_USCA/!svn/ver/13715/clonTracer_analyze/trunk/modules/barcode_count.py
+END
+tall_skinny.py
+K 25
+svn:wc:ra_dav:version-url
+V 82
+/svn/NITAS_ONC_USCA/!svn/ver/13501/clonTracer_analyze/trunk/modules/tall_skinny.py
+END
+simplify.py
+K 25
+svn:wc:ra_dav:version-url
+V 79
+/svn/NITAS_ONC_USCA/!svn/ver/13501/clonTracer_analyze/trunk/modules/simplify.py
+END
+matricize.py
+K 25
+svn:wc:ra_dav:version-url
+V 80
+/svn/NITAS_ONC_USCA/!svn/ver/13501/clonTracer_analyze/trunk/modules/matricize.py
+END
